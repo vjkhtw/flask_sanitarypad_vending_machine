@@ -3,29 +3,31 @@
 {% block content %}
   <h1>Consumption Statistics</h1>
 
-  <form>
+  <form method="POST">
     <div class="form-group">
-      <label for="period">Select period:</label>
-      <select class="form-control" id="period" name="period" onchange="this.form.submit()">
-        <option value="">-- Select period --</option>
-        <option value="daily" {% if period == 'daily' %}selected{% endif %}>Daily</option>
-        <option value="weekly" {% if period == 'weekly' %}selected{% endif %}>Weekly</option>
-        <option value="monthly" {% if period == 'monthly' %}selected{% endif %}>Monthly</option>
+      <label for="interval">Select interval:</label>
+      <select class="form-control" id="interval" name="interval" onchange="this.form.submit()">
+        <option value="">-- Select interval --</option>
+        <option value="daily" {% if interval == 'daily' %}selected{% endif %}>Daily</option>
+        <option value="weekly" {% if interval == 'weekly' %}selected{% endif %}>Weekly</option>
+        <option value="monthly" {% if interval == 'monthly' %}selected{% endif %}>Monthly</option>
+        <option value="total" {% if interval == 'total' %}selected{% endif %}>Total</option>
       </select>
     </div>
+    <input type="hidden" name="product_id" value="{{ product_id }}">
   </form>
 
-  {% if period == 'daily' %}
+  {% if interval == 'daily' %}
     <canvas id="daily-chart"></canvas>
     <script>
       var ctx = document.getElementById('daily-chart').getContext('2d');
       var myChart = new Chart(ctx, {
         type: 'bar',
         data: {
-          labels: {{ labels | tojson }},
+          labels: {{ daily_labels | tojson }},
           datasets: [{
             label: 'Daily Consumption',
-            data: {{ data | tojson }},
+            data: {{ daily_data | tojson }},
             backgroundColor: 'rgba(54, 162, 235, 0.2)',
             borderColor: 'rgba(54, 162, 235, 1)',
             borderWidth: 1
@@ -42,10 +44,87 @@
         }
       });
     </script>
-  {% elif period == 'weekly' %}
-    <p>Weekly consumption: {{ weekly_usage }}</p>
-  {% elif period == 'monthly' %}
-    <p>Monthly consumption: {{ monthly_usage }}</p>
+  {% elif interval == 'weekly' %}
+    <canvas id="weekly-chart"></canvas>
+    <script>
+      var ctx = document.getElementById('weekly-chart').getContext('2d');
+      var myChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: {{ weekly_labels | tojson }},
+          datasets: [{
+            label: 'Weekly Consumption',
+            data: {{ weekly_data | tojson }},
+            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+            borderColor: 'rgba(54, 162, 235, 1)',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          scales: {
+            yAxes: [{
+              ticks: {
+                beginAtZero: true
+              }
+            }]
+          }
+        }
+      });
+    </script>
+  {% elif interval == 'monthly' %}
+    <canvas id="monthly-chart"></canvas>
+    <script>
+      var ctx = document.getElementById('monthly-chart').getContext('2d');
+      var myChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: {{ monthly_labels | tojson }},
+          datasets: [{
+            label: 'Monthly Consumption',
+            data: {{ monthly_data | tojson }},
+            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+            borderColor: 'rgba(54, 162, 235, 1)',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          scales: {
+            yAxes: [{
+              ticks: {
+                beginAtZero: true
+              }
+            }]
+          }
+        }
+      });
+    </script>
+  {% elif interval == 'total' %}
+    <canvas id="total-chart"></canvas>
+    <script>
+      var ctx = document.getElementById('total-chart').getContext('2d');
+      var myChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: {{ total_labels | tojson }},
+          datasets: [{
+            label: 'Total Consumption',
+            data: {{ total_data | tojson }},
+            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+            borderColor: 'rgba(54, 162, 235, 1)',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          scales: {
+            yAxes: [{
+              ticks: {
+                beginAtZero: true
+              }
+            }]
+          }
+        }
+      });
+    </script>
   {% endif %}
 
 {% endblock %}

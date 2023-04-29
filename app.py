@@ -1,201 +1,250 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file
+import os
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func
 from datetime import datetime, timedelta, date
+from dateutil.relativedelta import relativedelta
 import calendar
-from flask_wtf import FlaskForm
-from wtforms import StringField, SubmitField, SelectField
-from wtforms.validators import DataRequired
+from sqlalchemy import func
+import sqlite3
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///vending.db'
 db = SQLAlchemy(app)
+
 app.secret_key = 'your-secret-key-here'
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), unique=True, nullable=False)
     rfid = db.Column(db.String(120), unique=True, nullable=False)
-    location_name = db.Column(db.String(50), db.ForeignKey('location.name'), nullable=False)
-    location = db.relationship('Location', backref=db.backref('users', lazy=True))
     
     def __repr__(self):
-        return f"User(name={self.name}, location={self.location})"
+        return '<User %r>' % self.name
 
 class Transaction(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False) 
     transaction_date = db.Column(db.Date, nullable=False)
-    daily_usage = db.Column(db.Date, nullable=False)
     quantity = db.Column(db.Integer, nullable=False)  
-    machine_id = db.Column(db.Integer, db.ForeignKey('machine.id'), nullable=False)
-
+    daily_usage = db.Column(db.Date, nullable=False)
+    location = db.Column(db.String(120), nullable=False)
     user = db.relationship('User',backref=db.backref('transactions', lazy=True))
-    machine = db.relationship('Machine', backref=db.backref('transactions', lazy=True))
 
-class AddUserForm(FlaskForm):
-    name = StringField('Name', validators=[DataRequired()])
-    rfid = StringField('RFID', validators=[DataRequired()])
-    location = SelectField('Location', coerce=str)
-
-class Machine(db.Model):
+class VendingMachine(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(50), nullable=False)
-    location_name = db.Column(db.String(50), db.ForeignKey('location.name'), nullable=False)
-    pad_count = db.Column(db.Integer, nullable=False)
     total_pads = db.Column(db.Integer, nullable=False)
 
-    location = db.relationship('Location', backref=db.backref('machines', lazy=True))
-
-    def __repr__(self):
-        return f"Machine(name={self.name}, location={self.location}, pad_count={self.pad_count}, total_pads={self.total_pads})"
-
-class Location(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(50), nullable=False)
-
-    def __repr__(self):
-        return f"Location(name={self.name})"
-
-class AddLocationForm(FlaskForm):
-    location = StringField('Location', validators=[DataRequired()])
-    submit = SubmitField('Add Location')
-
-#access records of users to machines
-class Access(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    machine_id = db.Column(db.Integer, db.ForeignKey('machine.id'), nullable=False)
-    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-
-    user = db.relationship('User', backref=db.backref('accesses', lazy=True))
-    machine = db.relationship('Machine', backref=db.backref('accesses', lazy=True))
-
-    def __repr__(self):
-        return f"Access(user={self.user}, machine={self.machine}, timestamp={self.timestamp})"
-
-class Consumption(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    amount = db.Column(db.Float, nullable=False)
-    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-
-    def __repr__(self):
-        return f"Consumption(user_id={self.user_id}, amount={self.amount}, timestamp={self.timestamp})"
-
-def get_consumption_stats(period='day'):
-    # Determine the start and end dates for the selected period
+def get_daily_consumption_data(product_id):
+    # Get the start and end date of the current day
     today = datetime.today().date()
-    if period == 'day':
-        start_date = today
-        end_date = today + timedelta(days=1)
-    elif period == 'week':
-        start_date = today - timedelta(days=today.weekday())
-        end_date = start_date + timedelta(weeks=1)
-    elif period == 'month':
-        start_date = today.replace(day=1)
-        if start_date.month == 12:
-            end_date = start_date.replace(year=start_date.year+1, month=1)
-        else:
-            end_date = start_date.replace(month=start_date.month+1)
-        # Convert end date to datetime to allow filtering by range
-        end_date = datetime.combine(end_date, datetime.min.time())
-    else:
-        raise ValueError('Invalid period')
+    start_date = datetime.combine(today, datetime.min.time())
+    end_date = datetime.combine(today, datetime.max.time())
 
-    # Query the consumption data for the selected period
-    stats = db.session.query(Consumption.user_id, db.func.sum(Consumption.amount))\
-                      .filter(Consumption.timestamp >= start_date, Consumption.timestamp < end_date)\
-                      .group_by(Consumption.user_id)\
-                      .all()
+    # Query the database for the consumption data for the given product and date range
+    daily_data = db.session.query(func.sum(Transaction.quantity), func.extract('hour', Transaction.transaction_date)). \
+        filter(Transaction.id == product_id). \
+        filter(Transaction.transaction_date >= start_date). \
+        filter(Transaction.transaction_date <= end_date). \
+        group_by(func.extract('hour', Transaction.transaction_date)). \
+        all()
 
-    return stats
+    # Format the data into a list of consumption values for each hour of the day
+    daily_consumption = [0] * 24
+    daily_labels = [f"{i:02d}:00" for i in range(24)]
+    for data in daily_data:
+        hour = data[1]
+        daily_consumption[hour] = data[0]
+
+    return daily_labels, daily_consumption
+
+def get_weekly_consumption_data(product_id):
+    # Get the start and end date of the current week
+    today = date.today()
+    start_date = today - timedelta(days=today.weekday())
+    end_date = start_date + timedelta(days=6)
+
+    # Query the database for the consumption data for the given product and date range
+    weekly_data = db.session.query(func.sum(Transaction.quantity)). \
+        filter(Transaction.id == product_id). \
+        filter(Transaction.transaction_date >= start_date). \
+        filter(Transaction.transaction_date <= end_date). \
+        group_by(Transaction.transaction_date). \
+        all()
+
+    # Format the data into a list of consumption values for each week
+    weekly_consumption = [data[0] for data in weekly_data]
+    weekly_labels = [start_date + timedelta(days=i) for i in range(7)]
+
+    return weekly_labels, weekly_consumption
+
+def get_monthly_consumption_data(product_id):
+    # Get the start and end date of the current month
+    today = date.today()
+    start_date = today.replace(day=1)
+    end_date = start_date + relativedelta(months=1) - timedelta(days=1)
+
+    # Query the database for the consumption data for the given product and date range
+    monthly_data = db.session.query(func.sum(Transaction.quantity)). \
+        filter(Transaction.id == product_id). \
+        filter(Transaction.transaction_date >= start_date). \
+        filter(Transaction.transaction_date <= end_date). \
+        group_by(Transaction.transaction_date). \
+        all()
+
+    # Format the data into a list of consumption values for each month
+    monthly_consumption = [data[0] for data in monthly_data]
+    monthly_labels = [start_date + timedelta(days=i) for i in range((end_date - start_date).days + 1)]
+
+    return monthly_labels, monthly_consumption
+
+def get_total_consumption_data(product_id):
+    # Query the database for the total consumption data for the given product
+    total_data = db.session.query(func.sum(Transaction.quantity)). \
+        filter(Transaction.id == product_id). \
+        scalar()
+
+    # Format the data into a list of consumption values for the total period
+    total_consumption = [total_data] if total_data else []
+    total_labels = ["Total"]
+
+    return total_labels, total_consumption
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return redirect(url_for('admin_panel'))
+
+@app.route('/admin_panel')
+def admin_panel():
+    return render_template('admin_panel.html')
+
+@app.route('/add_user', methods=['POST']) 
+def add_user():
+    name = request.form.get('name')
+    rfid = request.form.get('rfid')
+    new_user = User(name=name, rfid=rfid)
+    db.session.add(new_user)
+    db.session.commit()
+    return redirect(url_for('admin'))
+
+@app.route('/stock_machine', methods=['POST'])
+def stock_machine():
+    total_pads = request.form.get('total_pads')
+    machine = VendingMachine.query.first()
+    if machine:
+        machine.total_pads = total_pads
+    else:
+        machine = VendingMachine(total_pads=total_pads)
+        db.session.add(machine)
+    db.session.commit()
+    return redirect(url_for('admin'))
+
+@app.route('/dispense_pad', methods=['POST'])
+def dispense_pad():
+    rfid = request.form.get('rfid')
+    user = User.query.filter_by(rfid=rfid).first()
+    machine = VendingMachine.query.first()
+    if user and machine.total_pads > 0:
+        transaction = Transaction(user_id=user.id)
+        db.session.add(transaction)
+        machine.total_pads -= 1
+        db.session.commit()
+        return 'Pad dispensed'
+    elif machine.total_pads == 0:
+        return 'Machine is empty'
+    else:
+        return 'Invalid RFID'
 
 @app.route('/admin')
 def admin():
-    # Get the selected location from the query string
-    location_name = request.args.get('location')
-
-    # Get the list of locations and machines
-    locations = Location.query.all()
-    machines = Machine.query.all()
-
-    # Filter the machines by location
-    if location_name is not None:
-        machines = Machine.query.join(Location).filter_by(name=location_name).all()
-        # Get the list of users for the selected location and their RFID
-        users = User.query.join(Access).join(Machine).join(Location).\
-            filter(Location.name == location_name).\
-            with_entities(User.id, User.name, User.rfid).\
-            distinct().all()
-    else:
-        # Get the list of all users and their RFID
-        users = User.query.with_entities(User.id, User.name, User.rfid).distinct().all()
-
-    # Get the pad count for each user
-    user_pad_counts = db.session.query(User.id, func.count(Access.id)).join(Access).join(Machine).join(Location).filter(Location.name == location_name, Location.name == User.location)\
-                        .group_by(User.id).all()
-    for user in users:
-        pad_count = Access.query.join(Machine).join(Location).\
-                    filter(Location.name == location_name, Access.user_id == user.id).count()
-        user_pad_counts[user.id] = pad_count
-
-    return render_template('admin.html', locations=locations, machines=machines, 
-                           users=users, user_pad_counts=user_pad_counts)
-
-@app.route('/add_user', methods=['GET', 'POST'])
-def add_user():
-    form = AddUserForm()
-    # Set choices for location field
-    form.location.choices = [(location.name, location.name) for location in Location.query.all()]
-    if form.validate_on_submit():
-        # Process form data and add new user to database
-        return redirect(url_for('admin'))
-    return render_template('add_user.html', form=form)
-
-@app.route('/add_location', methods=['GET', 'POST'])
-def add_location():
-    form = AddLocationForm()
-    if form.validate_on_submit():
-        # Add the new location to the database
-        location = form.location.data
-        db.session.add(Location(name=location))
-        db.session.commit()
-        flash(f'Location "{location}" added successfully!', 'success')
-        return redirect(url_for('admin'))
-
-    return render_template('add_location.html', form=form)
-
-@app.route('/update_pad_count', methods=['POST'])
-def update_pad_count():
-    machine_id = request.form.get('machine_id')
-    pad_count = request.form.get('pad_count')
-    machine = Machine.query.get(machine_id)
-    if machine:
-        machine.pad_count = pad_count
-        db.session.commit()
-        return 'Success'
-    else:
-        return 'Machine not found'
+    users = User.query.all()
+    machine = VendingMachine.query.first()
+    return render_template('admin.html', users=users, machine=machine)
 
 @app.route('/vend', methods=['POST'])
 def vend():
     rfid = request.form.get('rfid')
-    machine_id = request.form.get('machine_id')
+    location = request.form.get('location')
     user = User.query.filter_by(rfid=rfid).first()
-    machine = Machine.query.get(machine_id)
-    if user and machine:
-        new_transaction = Transaction(user_id=user.id, transaction_date=date.today(), quantity=1, machine_id=machine.id)
-        machine.pad_count -= 1
+    if user:
+        new_transaction = Transaction(user_id=user.id, transaction_date=date.today(), quantity=1, location=location)
         db.session.add(new_transaction)
         db.session.commit()
         return 'Success'
     else:
-        return 'Invalid RFID or machine ID'
+        return 'Invalid RFID'
+
+@app.route('/consumption_statistics', methods=['GET', 'POST'])
+def consumption_statistics():
+    if request.method == 'POST':
+        product_id = request.form.get('product_id')
+        selected_interval = request.form.get('interval')
+    else:
+        product_id = request.args.get('product_id')
+        selected_interval = request.args.get('interval')
+
+    # Retrieve the consumption data based on the selected interval
+    if selected_interval == 'daily':
+        daily_labels, daily_data = get_daily_consumption_data(product_id)
+        return render_template('consumption_statistics.html',
+                               interval='daily',
+                               daily_labels=daily_labels,
+                               daily_data=daily_data,
+                               product_id=product_id)
+    elif selected_interval == 'weekly':
+        weekly_labels, weekly_data = get_weekly_consumption_data(product_id)
+        return render_template('consumption_statistics.html',
+                               interval='weekly',
+                               weekly_labels=weekly_labels,
+                               weekly_data=weekly_data,
+                               product_id=product_id)
+    elif selected_interval == 'monthly':
+        monthly_labels, monthly_data = get_monthly_consumption_data(product_id)
+        return render_template('consumption_statistics.html',
+                               interval='monthly',
+                               monthly_labels=monthly_labels,
+                               monthly_data=monthly_data,
+                               product_id=product_id)
+    elif selected_interval == 'total':
+        total_labels, total_data = get_total_consumption_data(product_id)
+        return render_template('consumption_statistics.html',
+                               interval='total',
+                               total_labels=total_labels,
+                               total_data=total_data,
+                               product_id=product_id)
+
+    return render_template('consumption_statistics.html', product_id=product_id)
+
+
+@app.route('/user_pads/<int:user_id>/<interval>')
+def user_pads(user_id, interval):
+    user = User.query.get(user_id)
+    if not user:
+        return 'Invalid user'
+    transactions = user.transactions
+    if not transactions:
+        return 'No transactions found for user'
+
+    if interval == 'daily':
+        start_date = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+        end_date = datetime.today().replace(hour=23, minute=59, second=59, microsecond=999999)
+    elif interval == 'weekly':
+        today = datetime.today()
+        start_date = today - timedelta(days=today.weekday())
+        end_date = start_date + timedelta(days=6)
+    elif interval == 'monthly':
+        today = datetime.today()
+        start_date = today.replace(day=1)
+        end_date = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+    else:
+        start_date = datetime.min
+        end_date = datetime.max
+
+    pads = sum([t.pads_used for t in transactions if start_date <= t.timestamp <= end_date])
+    return str(pads)
 
 if __name__ == '__main__':
     with app.app_context():
