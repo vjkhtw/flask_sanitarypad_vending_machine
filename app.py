@@ -5,34 +5,41 @@ from datetime import datetime, timedelta, date
 from dateutil.relativedelta import relativedelta
 import calendar
 from sqlalchemy import func
-import sqlite3
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-
+from flask_socketio import SocketIO, emit
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///vending.db'
 db = SQLAlchemy(app)
+socketio = SocketIO(app)
 
 app.secret_key = 'your-secret-key-here'
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(80), unique=True, nullable=False)
-    rfid = db.Column(db.String(120), unique=True, nullable=False)
-    
-    def __repr__(self):
-        return '<User %r>' % self.name
+    name = db.Column(db.String(50))
+    rfid = db.Column(db.String(50), unique=True)
+    transactions = db.relationship('Transaction', backref='user', lazy=True)
+    pad_count = db.Column(db.Integer, default=0)
 
 class Transaction(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False) 
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     transaction_date = db.Column(db.Date, nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)  
-    daily_usage = db.Column(db.Date, nullable=False)
-    location = db.Column(db.String(120), nullable=False)
-    user = db.relationship('User',backref=db.backref('transactions', lazy=True))
+    quantity = db.Column(db.Integer, nullable=False)
+    daily_usage = db.Column(db.String(50))
+    location = db.Column(db.String(50))
+
+    def __init__(self, user_id, transaction_date, quantity, daily_usage, location):
+        self.user_id = user_id
+        self.transaction_date = transaction_date
+        self.quantity = quantity
+        self.daily_usage = daily_usage
+        self.location = location
+        self.user = User.query.get(user_id)
+        self.user.pad_count += self.quantity
+        db.session.add(self)
+        db.session.add(self.user)
+        db.session.commit()
 
 class VendingMachine(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -40,7 +47,7 @@ class VendingMachine(db.Model):
 
 def get_daily_consumption_data(product_id):
     # Get the start and end date of the current day
-    today = datetime.today().date()
+    today = date.today()
     start_date = datetime.combine(today, datetime.min.time())
     end_date = datetime.combine(today, datetime.max.time())
 
@@ -148,6 +155,7 @@ def dispense_pad():
         db.session.add(transaction)
         machine.total_pads -= 1
         db.session.commit()
+        socketio.emit('pad_dispensed', {'user_id': user.id, 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')})
         return 'Pad dispensed'
     elif machine.total_pads == 0:
         return 'Machine is empty'
@@ -158,7 +166,13 @@ def dispense_pad():
 def admin():
     users = User.query.all()
     machine = VendingMachine.query.first()
-    return render_template('admin.html', users=users, machine=machine)
+    pads_dispensed = 0
+
+    @socketio.on('pad_dispensed')
+    def handle_pad_dispensed(data):
+        nonlocal pads_dispensed
+        pads_dispensed += 1
+    return render_template('admin.html', users=users, machine=machine, pads_dispensed=pads_dispensed)
 
 @app.route('/vend', methods=['POST'])
 def vend():
@@ -218,29 +232,26 @@ def consumption_statistics():
 @app.route('/user_pads/<int:user_id>/<interval>')
 def user_pads(user_id, interval):
     user = User.query.get(user_id)
-    if not user:
-        return 'Invalid user'
-    transactions = user.transactions
-    if not transactions:
-        return 'No transactions found for user'
+    if user is None:
+        return f'User with id {user_id} not found', 404
 
-    if interval == 'daily':
-        start_date = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
-        end_date = datetime.today().replace(hour=23, minute=59, second=59, microsecond=999999)
+    today = date.today()
+    if interval == 'total':
+        pads_used = user.pad_count
+    elif interval == 'daily':
+        pads_used = len(Transaction.query.filter_by(user_id=user_id, transaction_date=today).all())
     elif interval == 'weekly':
-        today = datetime.today()
-        start_date = today - timedelta(days=today.weekday())
-        end_date = start_date + timedelta(days=6)
+        start_of_week = today - timedelta(days=today.weekday())
+        end_of_week = start_of_week + timedelta(days=6)
+        pads_used = len(Transaction.query.filter_by(user_id=user_id).filter(Transaction.transaction_date.between(start_of_week, end_of_week)).all())
     elif interval == 'monthly':
-        today = datetime.today()
-        start_date = today.replace(day=1)
-        end_date = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+        start_of_month = date(today.year, today.month, 1)
+        end_of_month = date(today.year, today.month + 1, 1) - timedelta(days=1)
+        pads_used = len(Transaction.query.filter_by(user_id=user_id).filter(Transaction.transaction_date.between(start_of_month, end_of_month)).all())
     else:
-        start_date = datetime.min
-        end_date = datetime.max
+        return f'Invalid interval {interval}', 400
 
-    pads = sum([t.pads_used for t in transactions if start_date <= t.timestamp <= end_date])
-    return str(pads)
+    return str(pads_used)
 
 if __name__ == '__main__':
     with app.app_context():
