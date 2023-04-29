@@ -117,10 +117,6 @@ def get_total_consumption_data(product_id):
 def index():
     return redirect(url_for('admin_panel'))
 
-@app.route('/admin_panel')
-def admin_panel():
-    return render_template('admin_panel.html')
-
 @app.route('/add_user', methods=['POST']) 
 def add_user():
     name = request.form.get('name')
