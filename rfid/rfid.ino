@@ -5,8 +5,8 @@
 #define SS_PIN 10
 #define RST_PIN 9
 
-const char* ssid = "piratesofequator_5";
-const char* password = "CLB27F979D";
+const char* ssid = "wifi_ssid";
+const char* password = "wifi_password";
 const char* server_url = "http://127.0.0.1:5000";
 
 MFRC522 mfrc522(SS_PIN, RST_PIN);   // Create MFRC522 instance.
