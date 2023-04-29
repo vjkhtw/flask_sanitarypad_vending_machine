@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <h2>Add User</h2>
+  <form method="POST">
+    {{ form.hidden_tag() }}
+    <div>
+      {{ form.name.label }} {{ form.name() }}
+    </div>
+    <div>
+      {{ form.rfid.label }} {{ form.rfid() }}
+    </div>
+    <div>
+      {{ form.location.label }} {{ form.location() }}
+    </div>
+    <button type="submit">Add User</button>
+  </form>
+{% endblock %}

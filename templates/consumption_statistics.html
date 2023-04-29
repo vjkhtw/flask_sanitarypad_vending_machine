@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <h1>Consumption Statistics</h1>
+
+  <form>
+    <div class="form-group">
+      <label for="period">Select period:</label>
+      <select class="form-control" id="period" name="period" onchange="this.form.submit()">
+        <option value="">-- Select period --</option>
+        <option value="daily" {% if period == 'daily' %}selected{% endif %}>Daily</option>
+        <option value="weekly" {% if period == 'weekly' %}selected{% endif %}>Weekly</option>
+        <option value="monthly" {% if period == 'monthly' %}selected{% endif %}>Monthly</option>
+      </select>
+    </div>
+  </form>
+
+  {% if period == 'daily' %}
+    <canvas id="daily-chart"></canvas>
+    <script>
+      var ctx = document.getElementById('daily-chart').getContext('2d');
+      var myChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: {{ labels | tojson }},
+          datasets: [{
+            label: 'Daily Consumption',
+            data: {{ data | tojson }},
+            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+            borderColor: 'rgba(54, 162, 235, 1)',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          scales: {
+            yAxes: [{
+              ticks: {
+                beginAtZero: true
+              }
+            }]
+          }
+        }
+      });
+    </script>
+  {% elif period == 'weekly' %}
+    <p>Weekly consumption: {{ weekly_usage }}</p>
+  {% elif period == 'monthly' %}
+    <p>Monthly consumption: {{ monthly_usage }}</p>
+  {% endif %}
+
+{% endblock %}

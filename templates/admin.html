@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+
+{% block content %}
+
+    <div class="container">
+        <h1>Admin Panel</h1>
+
+        <h2>Vending Machines</h2>
+        <form method="GET">
+          <label for="location">Location:</label>
+          <select name="location" id="location">
+            <option value="">All</option>
+            {% for location in locations %}
+              <option value="{{ location.name }}" {% if location.name == selected_location %}selected{% endif %}>{{ location.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">Filter</button>
+        </form>
+      
+        <a href="{{ url_for('add_location') }}">Add Location</a>
+      
+
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>RFID</th>
+              <th>Pad Count</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for user in users %}
+              <tr>
+                <td>{{ user.name }}</td>
+                <td>{{ user.rfid }}</td>
+                <td>{{ user_pad_counts[user.id] }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+    <hr>
+    <a href="{{ url_for('add_user') }}">Add User</a>
+    <h2>Consumption statistics</h2>
+      <form method="GET" action="{{ url_for('admin') }}">
+        <div class="form-group">
+          <label for="period">Period:</label>
+          <select class="form-control" id="period" name="period" onchange="this.form.submit()">
+            <option value="day" {% if period == 'day' %}selected{% endif %}>Day</option>
+            <option value="week" {% if period == 'week' %}selected{% endif %}>Week</option>
+            <option value="month" {% if period == 'month' %}selected{% endif %}>Month</option>
+          </select>
+        </div>
+      </form>
+      <p>Showing statistics for the past {{ period }}:</p>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Consumption</th>
+          </tr>
+        </thead>
+        {% for user, consumption in stats %}
+          <tr>
+            <td>{{ user }}</td>
+            <td>{{ consumption }}</td>
+          </tr>
+        {% endfor %}
+      </table>
+</div>
+</div>
+       
+
+{% endblock %}

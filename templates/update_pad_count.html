@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <h1>Update Pad Count</h1>
+  <form method="POST" action="{{ url_for('update_pad_count') }}">
+    {{ form.csrf_token }}
+    {{ form.machine_id.label }} {{ form.machine_id() }}<br>
+    {{ form.pad_count.label }} {{ form.pad_count() }}<br>
+    {{ form.submit() }}
+  </form>
+  
+{% endblock %}
